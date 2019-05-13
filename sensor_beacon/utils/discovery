@@ -1,0 +1,178 @@
+#!/usr/bin/python3 -u
+#
+# Copyright (c) 2019, PHYTEC Messtechnik GmbH
+#
+# DBus API code is based on test/bluezutils.py and
+# test/test-discovery files from BlueZ project
+# (BlueZ - Bluetooth protocol stack for Linux) that is
+# Copyright (C) 2000-2001  Qualcomm Incorporated
+# Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
+# Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
+# Copyright (C) 2000-2018  BlueZ Project contributors
+#
+# SPDX-License-Identifier: GPL-2.0-only
+
+from gi.repository import GLib
+import dbus
+import dbus.mainloop.glib
+
+from ctypes import *
+from struct  import *
+
+import paho.mqtt.client as mqtt
+import json
+import time
+import sys
+import signal
+
+SERVICE_NAME = "org.bluez"
+ADAPTER_INTERFACE = SERVICE_NAME + ".Adapter1"
+DEFAULT_DEV_ID = None
+BEACON_MFG_ID = 0xffff
+#beacon code as little endian
+BEACON_CODE = 0xacbe
+
+class _sensor_data(Union):
+    _fields_ = [
+        ('u8', c_uint8 * 16),
+        ('f32', c_float * 4),
+    ]
+
+class beacon_sensor_data(Structure):
+    _pack_ = (1)
+    _fields_ = [
+        ('type', c_uint8 * 4),
+        ('values', _sensor_data),
+    ]
+
+class beacon_addata(Structure):
+    _fields_ = [
+        ('beacon_code', c_uint16),
+        ('data', beacon_sensor_data),
+        ('rssi', c_int8),
+        ('reserved', c_uint8),
+    ]
+
+mqtt_client = mqtt.Client()
+devices = {}
+
+def signal_handler(signal, frame):
+    print('bye')
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+def do_publish_json(address, mfg_id, rssi, adv_data):
+    ts = int(round(time.time() * 1000))
+
+    rpayload = {
+        "sensorId" : address,
+        "RSSI" : rssi,
+        "mfgId" : "%04X" % (mfg_id),
+        "ts" : ts,
+        "referenceRSSI" : adv_data.rssi,
+        "reserved" : adv_data.reserved,
+        "sensorData" : {
+            "type" : "" + ''.join(["%d " % x for x in adv_data.data.type]),
+            "value" : "" + ''.join(["%f " % x for x in adv_data.data.values.f32]),
+        }
+    }
+    print(json.dumps(rpayload, indent = 4))
+    mqtt_client.publish("sensor",
+                        payload = json.dumps(rpayload, indent = 4),
+                        qos=0, retain=False)
+
+def properties_changed(interface, changed, invalidated, path):
+    if interface != "org.bluez.Device1":
+        return
+
+    if path in devices:
+        devices[path] = {**devices[path], **changed}
+    else:
+        devices[path] = changed
+
+    if "ManufacturerData" not in devices[path]:
+        return
+
+    mfg_data = devices[path]["ManufacturerData"]
+    if (type(mfg_data) is not dbus.Dictionary):
+        return
+
+    if BEACON_MFG_ID not in mfg_data:
+        return
+
+    # Length of (Beacon Code + Beacon ID + Ref RSSI + MFG RSVD) = 24
+    if len(list(mfg_data[BEACON_MFG_ID])) != 24:
+        return
+
+    adv_data = beacon_addata.from_buffer(bytearray(mfg_data[BEACON_MFG_ID]))
+    if (adv_data.beacon_code != BEACON_CODE):
+        return
+
+    if "Address" in devices[path]:
+        address = devices[path]["Address"]
+    else:
+        address = "<unknown>"
+
+    if "RSSI" in devices[path]:
+        rssi = devices[path]["RSSI"]
+    else:
+        rssi = "<unknown>"
+
+    #print("changed", changed)
+    do_publish_json(address, BEACON_MFG_ID, rssi, adv_data)
+
+def find_adapter_in_objects(pattern=None):
+    bus = dbus.SystemBus()
+    manager = dbus.Interface(bus.get_object("org.bluez", "/"),
+                "org.freedesktop.DBus.ObjectManager")
+    objects = manager.GetManagedObjects()
+    for path, ifaces in objects.items():
+        adapter = ifaces.get(ADAPTER_INTERFACE)
+        if adapter is None:
+            continue
+        if not pattern or pattern == adapter["Address"] or \
+                            path.endswith(pattern):
+            obj = bus.get_object(SERVICE_NAME, path)
+            return dbus.Interface(obj, ADAPTER_INTERFACE)
+    raise Exception("Bluetooth adapter not found")
+
+if __name__ == '__main__':
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+    bus = dbus.SystemBus()
+
+    adapter = find_adapter_in_objects(DEFAULT_DEV_ID)
+
+    bus.add_signal_receiver(properties_changed,
+            dbus_interface = "org.freedesktop.DBus.Properties",
+            signal_name = "PropertiesChanged",
+            arg0 = "org.bluez.Device1",
+            path_keyword = "path")
+
+    om = dbus.Interface(bus.get_object("org.bluez", "/"),
+            "org.freedesktop.DBus.ObjectManager")
+    objects = om.GetManagedObjects()
+    for path, interfaces in objects.items():
+        if "org.bluez.Device1" in interfaces:
+            devices[path] = interfaces["org.bluez.Device1"]
+
+    scan_filter = dict()
+    scan_filter.update({ "Transport": "le"})
+    scan_filter.update({ "DuplicateData" : True})
+    adapter.SetDiscoveryFilter(scan_filter)
+    adapter.StartDiscovery()
+
+    while True:
+        try:
+            print("Connecting with MQTT client")
+            mqtt_client.connect("localhost", 1883, 60)
+            print("Connected..")
+            break
+        except:
+            print("Connection failed, retrying..")
+            time.sleep(2)
+    mqtt_client.loop_start()
+
+    mainloop = GLib.MainLoop()
+    mainloop.run()
