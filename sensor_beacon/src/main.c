@@ -106,7 +106,7 @@ static int get_hdc1010_val(struct sensor_value *val)
 {
 	if (sensor_sample_fetch(hdc1010_dev)) {
 		printk("Failed to fetch sample for device %s\n",
-		       DT_TI_HDC1008_0_LABEL);
+		       DT_TI_HDC1010_0_LABEL);
 		return -1;
 	}
 
@@ -259,9 +259,9 @@ void main(void)
 	force_dcdc_low_power_mode();
 	k_delayed_work_init(&adv_timer, do_adv_stop);
 
-	hdc1010_dev = device_get_binding(DT_TI_HDC1008_0_LABEL);
+	hdc1010_dev = device_get_binding(DT_TI_HDC1010_0_LABEL);
 	if (hdc1010_dev == NULL) {
-		printk("Failed to get %s device\n", DT_TI_HDC1008_0_LABEL);
+		printk("Failed to get %s device\n", DT_TI_HDC1010_0_LABEL);
 		return;
 	}
 
