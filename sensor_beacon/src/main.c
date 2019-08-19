@@ -23,19 +23,19 @@
  */
 #define BEACON_MFG_ID			0xffff
 
-
 #define LOW_POWER_STATE_TIME		200
 
 #define BEACON_ADVERTISING_TIME		200
 
-#define PROXIMITY_THOLD			200
+/* 0.2 meter */
+#define PROXIMITY_THOLD			0.200
 
 #define MAX_NUMOF_BELOW_THOLD		100
 
 K_SEM_DEFINE(bt_ready_sem, 0, 1);
 static struct k_delayed_work adv_timer;
-static struct device *apds9960_dev;
 static struct device *hdc1010_dev;
+static struct device *vl53l0x_dev;
 
 static float numof_proxy_events = 0;
 static float numof_below_thold = 0;
@@ -87,21 +87,6 @@ static const struct bt_data ad[] = {
 	BT_DATA(BT_DATA_MANUFACTURER_DATA, &mfg_data, sizeof(mfg_data)),
 };
 
-static int get_apds9960_val(struct sensor_value *val)
-{
-	if (sensor_sample_fetch(apds9960_dev)) {
-		printk("Failed to fetch sample for device %s\n",
-		       DT_AVAGO_APDS9960_0_LABEL);
-		return -1;
-	}
-
-	if (sensor_channel_get(apds9960_dev, SENSOR_CHAN_PROX, &val[0])) {
-		return -1;
-	}
-
-	return 0;
-}
-
 static int get_hdc1010_val(struct sensor_value *val)
 {
 	if (sensor_sample_fetch(hdc1010_dev)) {
@@ -119,6 +104,21 @@ static int get_hdc1010_val(struct sensor_value *val)
 	if (sensor_channel_get(hdc1010_dev,
 			       SENSOR_CHAN_HUMIDITY,
 			       &val[1])) {
+		return -1;
+	}
+
+	return 0;
+}
+
+static int get_vl53l0x_val(struct sensor_value *val)
+{
+	if (sensor_sample_fetch(vl53l0x_dev)) {
+		printk("Failed to fetch sample for device %s\n",
+		       DT_INST_0_ST_VL53L0X_LABEL);
+		return -1;
+	}
+
+	if (sensor_channel_get(vl53l0x_dev, SENSOR_CHAN_DISTANCE, &val[0])) {
 		return -1;
 	}
 
@@ -148,7 +148,7 @@ static void measure_and_update_adv(void)
 {
 	int err;
 	struct sensor_value hdc1010_val[2];
-	struct sensor_value apds9960_val[1];
+	struct sensor_value vl53l0x_val[1];
 
 	/*
 	 * size_t bt_addr_count = ARRAY_SIZE(bt_addr);
@@ -179,10 +179,12 @@ static void measure_and_update_adv(void)
 		/* Reset all types and values */
 		memset(&mfg_data.data, 0, sizeof(mfg_data.data));
 
-		if (!get_apds9960_val(apds9960_val)) {
-			printk("Proximity:%d\n", apds9960_val[0].val1);
+		if (!get_vl53l0x_val(vl53l0x_val)) {
+			mfg_data.data.fvalues[2] =
+				sensor_value_to_double(vl53l0x_val);
+			printf("Distance is %.3fm\n", mfg_data.data.fvalues[2]);
 			/* Check if value is over threshold */
-			if (apds9960_val[0].val1 < PROXIMITY_THOLD) {
+			if (mfg_data.data.fvalues[2] > PROXIMITY_THOLD) {
 				numof_below_thold ++;
 				if (numof_below_thold > MAX_NUMOF_BELOW_THOLD) {
 					numof_below_thold = 0;
@@ -192,7 +194,6 @@ static void measure_and_update_adv(void)
 				}
 			} else {
 				mfg_data.data.type[2] = SENSOR_ID_PROX;
-				mfg_data.data.fvalues[2] = apds9960_val[0].val1;
 				numof_below_thold = 0;
 				/* Increment number of events */
 				numof_proxy_events ++;
@@ -265,9 +266,9 @@ void main(void)
 		return;
 	}
 
-	apds9960_dev = device_get_binding(DT_AVAGO_APDS9960_0_LABEL);
-	if (apds9960_dev == NULL) {
-		printk("Failed to get %s device\n", DT_AVAGO_APDS9960_0_LABEL);
+	vl53l0x_dev = device_get_binding(DT_INST_0_ST_VL53L0X_LABEL);
+	if (vl53l0x_dev == NULL) {
+		printk("Failed to get %s device\n", DT_INST_0_ST_VL53L0X_LABEL);
 		return;
 	}
 
