@@ -10,7 +10,7 @@
 #include <device.h>
 #include <gpio.h>
 #include <sensor.h>
-#include <misc/printk.h>
+#include <sys/printk.h>
 #include <stdio.h>
 #include <soc.h>
 
@@ -91,7 +91,7 @@ static int get_apds9960_val(struct sensor_value *val)
 {
 	if (sensor_sample_fetch(apds9960_dev)) {
 		printk("Failed to fetch sample for device %s\n",
-		       DT_AVAGO_APDS9960_0_LABEL);
+		       DT_INST_0_AVAGO_APDS9960_LABEL);
 		return -1;
 	}
 
@@ -106,7 +106,7 @@ static int get_hdc1010_val(struct sensor_value *val)
 {
 	if (sensor_sample_fetch(hdc1010_dev)) {
 		printk("Failed to fetch sample for device %s\n",
-		       DT_TI_HDC1010_0_LABEL);
+		       DT_INST_0_TI_HDC1010_LABEL);
 		return -1;
 	}
 
@@ -259,15 +259,16 @@ void main(void)
 	force_dcdc_low_power_mode();
 	k_delayed_work_init(&adv_timer, do_adv_stop);
 
-	hdc1010_dev = device_get_binding(DT_TI_HDC1010_0_LABEL);
+	hdc1010_dev = device_get_binding(DT_INST_0_TI_HDC1010_LABEL);
 	if (hdc1010_dev == NULL) {
-		printk("Failed to get %s device\n", DT_TI_HDC1010_0_LABEL);
+		printk("Failed to get %s device\n", DT_INST_0_TI_HDC1010_LABEL);
 		return;
 	}
 
-	apds9960_dev = device_get_binding(DT_AVAGO_APDS9960_0_LABEL);
+	apds9960_dev = device_get_binding(DT_INST_0_AVAGO_APDS9960_LABEL);
 	if (apds9960_dev == NULL) {
-		printk("Failed to get %s device\n", DT_AVAGO_APDS9960_0_LABEL);
+		printk("Failed to get %s device\n",
+		       DT_INST_0_AVAGO_APDS9960_LABEL);
 		return;
 	}
 
