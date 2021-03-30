@@ -8,8 +8,8 @@
 #include <string.h>
 #include <soc.h>
 #include <device.h>
-#include <gpio.h>
-#include <sensor.h>
+#include <drivers/gpio.h>
+#include <drivers/sensor.h>
 #include <sys/printk.h>
 #include <stdio.h>
 #include <soc.h>
@@ -34,15 +34,11 @@
 
 K_SEM_DEFINE(bt_ready_sem, 0, 1);
 static struct k_delayed_work adv_timer;
-static struct device *apds9960_dev;
-static struct device *hdc1010_dev;
+static const struct device *apds9960_dev;
+static const struct device *hdc1010_dev;
 
 static float numof_proxy_events = 0;
 static float numof_below_thold = 0;
-
-#define BT_LE_ADV_PRJ BT_LE_ADV_PARAM(BT_LE_ADV_OPT_USE_IDENTITY, \
-				      BT_GAP_ADV_FAST_INT_MIN_2, \
-				      BT_GAP_ADV_FAST_INT_MAX_2)
 
 enum sensor_type_id {
 	SENSOR_ID_NONE = 0,
@@ -53,22 +49,22 @@ enum sensor_type_id {
 };
 
 struct beacon_sensor_data {
-	u8_t type[4];
+	uint8_t type[4];
 	union {
-		u8_t values[16];
+		uint8_t values[16];
 		float fvalues[4];
 	};
 } __packed;
 
 struct altbeacon_proto_fields {
-	u16_t mfg_id;
-	u16_t beacon_code;
+	uint16_t mfg_id;
+	uint16_t beacon_code;
 	/* beacon code 20 octets */
 	struct beacon_sensor_data data;
 	/* reference RSSI */
-	s8_t rssi;
+	int8_t rssi;
 	/* reserved octet */
-	u8_t reserved;
+	uint8_t reserved;
 } __packed;
 
 static struct altbeacon_proto_fields mfg_data = {
@@ -91,7 +87,7 @@ static int get_apds9960_val(struct sensor_value *val)
 {
 	if (sensor_sample_fetch(apds9960_dev)) {
 		printk("Failed to fetch sample for device %s\n",
-		       DT_INST_0_AVAGO_APDS9960_LABEL);
+		       DT_LABEL(DT_INST(0, avago_apds9960)));
 		return -1;
 	}
 
@@ -106,7 +102,7 @@ static int get_hdc1010_val(struct sensor_value *val)
 {
 	if (sensor_sample_fetch(hdc1010_dev)) {
 		printk("Failed to fetch sample for device %s\n",
-		       DT_INST_0_TI_HDC1010_LABEL);
+		       DT_LABEL(DT_INST(0, ti_hdc1010)));
 		return -1;
 	}
 
@@ -220,7 +216,7 @@ static void measure_and_update_adv(void)
 			printk("Failed to fetch T|RH values\n");
 		}
 
-		err = bt_le_adv_start(BT_LE_ADV_PRJ, ad, ARRAY_SIZE(ad),
+		err = bt_le_adv_start(BT_LE_ADV_NCONN_IDENTITY, ad, ARRAY_SIZE(ad),
 				      NULL, 0);
 		if (err) {
 			/* This will also happens if the frequency of the
@@ -259,16 +255,16 @@ void main(void)
 	force_dcdc_low_power_mode();
 	k_delayed_work_init(&adv_timer, do_adv_stop);
 
-	hdc1010_dev = device_get_binding(DT_INST_0_TI_HDC1010_LABEL);
+	hdc1010_dev = device_get_binding(DT_LABEL(DT_INST(0, ti_hdc1010)));
 	if (hdc1010_dev == NULL) {
-		printk("Failed to get %s device\n", DT_INST_0_TI_HDC1010_LABEL);
+		printk("Failed to get %s device\n", DT_LABEL(DT_INST(0, ti_hdc1010)));
 		return;
 	}
 
-	apds9960_dev = device_get_binding(DT_INST_0_AVAGO_APDS9960_LABEL);
+	apds9960_dev = device_get_binding(DT_LABEL(DT_INST(0, avago_apds9960)));
 	if (apds9960_dev == NULL) {
 		printk("Failed to get %s device\n",
-		       DT_INST_0_AVAGO_APDS9960_LABEL);
+		       DT_LABEL(DT_INST(0, avago_apds9960)));
 		return;
 	}
 
